@@ -181,6 +181,32 @@ button:focus-visible,.slot:focus-visible,.chip:focus-visible,input:focus-visible
 .sum{display:flex;justify-content:center;gap:18px;color:var(--muted);font-size:14px}
 .sum b{font-weight:700;color:var(--ink)}
 
+/* recap */
+.recap{background:var(--surface);border-radius:20px;padding:18px 16px 14px;box-shadow:var(--shadow)}
+.rtitle{font-size:22px;text-align:center}
+.rmeta{color:var(--muted);font-size:13px;text-align:center}
+.rvs{display:flex;justify-content:center;align-items:center;gap:10px;margin:10px 0 4px;color:var(--muted);font-size:13px}
+.pill{font-weight:700;font-size:14px;padding:3px 10px;border-radius:999px;color:#fff}
+.pill.c1{background:var(--p1)}.pill.c2{background:var(--p2)}
+.rverdict{text-align:center;font-size:24px;margin:0 0 12px}
+.rverdict.c1{color:var(--p1)}.rverdict.c2{color:var(--p2)}
+.rhdr,.rrow{display:grid;grid-template-columns:20px 1fr auto 1fr auto;align-items:center;gap:6px}
+.rhdr{color:var(--muted);font-size:11px;padding-bottom:4px;border-bottom:1px solid var(--line)}
+.rhdr span:nth-child(2),.rhdr span:nth-child(4){text-align:center;letter-spacing:.3em;padding-left:.3em}
+.rrow{padding:7px 0;border-bottom:1px solid var(--line);font-size:22px;line-height:1.2}
+.rrow .rn{font-size:13px;color:var(--muted)}
+.rrow .rp{text-align:center;white-space:nowrap}
+.rrow .rv{font-size:12px;color:var(--muted)}
+.rl{font-size:18px;white-space:nowrap;min-width:70px;text-align:right}
+.rl b{font-weight:400}
+.rl .c1{color:var(--p1)}.rl .c2{color:var(--p2)}
+.rl .sep{color:var(--muted);margin:0 3px;font-size:13px}
+.rfinal{display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:10px;border-top:2px solid var(--line);font-size:13px;color:var(--muted)}
+.rfinal .rl{font-size:22px}
+.clash.still .tile,.clash.still .fx span{animation:none}
+.toast{position:fixed;left:50%;bottom:calc(28px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:999px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:9;white-space:nowrap}
+.toast.show{opacity:1}
+
 /* rules */
 dialog{border:0;border-radius:20px;padding:0;max-width:min(460px,92vw);width:100%;background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
 dialog::backdrop{background:rgba(10,14,28,.5)}
@@ -203,6 +229,7 @@ dialog::backdrop{background:rgba(10,14,28,.5)}
 </head>
 <body>
 <div id="app" role="main"></div>
+<div id="toast" class="toast" role="status"></div>
 
 <dialog id="rules">
   <div class="rules">
@@ -264,7 +291,8 @@ const S = {
   deadline:0, timer:null,
   result:null, over:undefined,
   cpuMem:[1,1,1,1,1,1],
-  score:[0,0,0]
+  score:[0,0,0],
+  hist:[], date:null, lastRecap:null, recapFrom:'result', resultDone:false
 };
 // online
 const R = {
@@ -346,6 +374,7 @@ function learn(p){ S.cpuMem=S.cpuMem.map(v=>v*0.75); const i=permIndex(p); if(i>
 function startGame(){
   S.life=[START,START]; S.prev=[START,START]; S.phase=1; S.picks=[null,null]; S.cur=0;
   S.result=null; S.over=undefined; S.cpuMem=[1,1,1,1,1,1];
+  S.hist=[]; S.date=new Date(); S.resultDone=false;
   if(S.mode==='cpu') beginSet(0); else { S.screen='handoff'; render(); }
 }
 function beginSet(idx){
@@ -385,8 +414,9 @@ function finishPhase(){
   S.prev=S.life.slice();
   S.life=[applyLife(S.life[0],r.heal[0],r.dmg[0]), applyLife(S.life[1],r.heal[1],r.dmg[1])];
   S.result=r; S.over=judge(S.life);
+  S.hist.push({picks:[S.picks[0].slice(),S.picks[1].slice()], after:S.life.slice()});
   if(S.over!==undefined){ if(S.over===null) S.score[2]++; else S.score[S.over]++; }
-  S.screen='result'; render(); animateResult();
+  S.resultDone=false; S.screen='result'; render(); animateResult();
 }
 function nextPhase(){
   S.phase++; S.picks=[null,null]; S.result=null;
@@ -501,18 +531,19 @@ function leaveOnline(){ stopTimer(); destroyPeer(); resetMatch(); R.state='menu'
 function syncOnline(){
   if(S.mode!=='online'||S.screen==='left'||R.state!=='playing'||!R.opp) return;
   const tg=R.opp.game;
-  if(tg>R.game){ R.rematchOffered=true; if(S.screen==='result') render(); return; }
+  if(tg>R.game){ R.rematchOffered=true; if(S.screen==='result'||S.screen==='recap') render(); return; }
   if(tg<R.game){ R.waitingRematch=true; if(S.screen==='result') render(); return; }
   if(R.syncedGame!==R.game){
     R.syncedGame=R.game; R.ack=0; R.setPhase=0; R.rematchOffered=false; R.waitingRematch=false;
     clearInterval(R.autoNext); R.autoNext=null;
+    S.hist=[]; S.date=new Date();
   }
   const mine=decList(R.picks), theirs=decList(R.opp.picks);
   const p0=R.seat===0?mine:theirs, p1=R.seat===0?theirs:mine;
   const rp=replay(p0,p1);
   const resolved=rp.phases.length;
   if(resolved>R.ack){
-    if(!(S.screen==='result'&&S.phase===R.ack+1)) showOnlineResult(rp.phases[R.ack],R.ack+1);
+    if(!(S.screen==='result'&&S.phase===R.ack+1)) showOnlineResult(rp.phases[R.ack],R.ack+1,rp.phases);
     return;
   }
   if(rp.over!==undefined) return;
@@ -525,9 +556,10 @@ function syncOnline(){
     else render();
   }
 }
-function showOnlineResult(ph,phaseNo){
+function showOnlineResult(ph,phaseNo,phases){
   stopTimer(); clearInterval(R.autoNext); R.autoNext=null;
   S.phase=phaseNo; S.prev=ph.before.slice(); S.life=ph.after.slice(); S.picks=ph.picks; S.result=ph.result; S.over=ph.over;
+  S.hist=phases.slice(0,phaseNo).map(p=>({picks:[p.picks[0].slice(),p.picks[1].slice()], after:p.after.slice()})); S.resultDone=false;
   if(S.over!==undefined&&R.scoredGame!==R.game){ R.scoredGame=R.game; if(S.over===null) S.score[2]++; else S.score[S.over]++; }
   S.screen='result'; render(); animateResult();
   if(S.over===undefined){
@@ -584,6 +616,7 @@ function vTitle(){
       <button data-a="level" data-v="normal" aria-pressed="${S.cpuLevel==='normal'}">読み合い</button>
     </div>
     <button class="btn ghost" data-a="rules">ルールを見る</button>
+    ${S.lastRecap?'<button class="btn ghost" data-a="recapLast" style="margin-top:-10px">前回の試合の振り返り</button>':''}
     ${played?`<div class="score">今日の戦績　${h(names()[0])} ${sc[0]} 勝 ／ ${h(names()[1])} ${sc[1]} 勝${sc[2]?` ／ 引き分け ${sc[2]}`:''}</div>`:''}
   </div>`;
 }
@@ -657,7 +690,7 @@ function vSet(locked){
 }
 
 function vResult(){
-  const r=S.result, bot=S.mode==='online'?R.seat:0, top=1-bot;
+  const r=S.result, bot=S.mode==='online'?R.seat:0, top=1-bot, done=S.resultDone;
   const fx=(list,slotIdx)=>`<div class="fx">${list.length?list.map((f,j)=>{
     const d=`style="animation-delay:${reduced?0:(0.5+slotIdx*0.4+j*0.12)}s"`;
     if(f.k==='dmg') return `<span class="dmg display" ${d}>−${f.v}</span>`;
@@ -684,19 +717,19 @@ function vResult(){
       <p>${S.phase}フェーズ目で決着　${h(names()[0])} ${S.life[0]} ／ ${h(names()[1])} ${S.life[1]}${(S.life[0]<=0&&S.life[1]<=0&&w!==null)?'<br>同時に0以下 → マイナスが大きい方の負け':''}</p>
       ${extra}
     </div>
-    <div class="foot"><div class="row"><button class="btn secondary" data-a="title">${S.mode==='online'?'退出':'タイトルへ'}</button>${again}</div></div>`;
+    <div class="foot"><button class="btn secondary" data-a="recap" style="margin-bottom:10px">振り返りを見る</button><div class="row"><button class="btn secondary" data-a="title">${S.mode==='online'?'退出':'タイトルへ'}</button>${again}</div></div>`;
   }
   return `
   <div class="topbar"><span>フェーズ ${S.phase} の結果</span>${topRight()}</div>
-  ${hud(top,S.prev[top])}
-  <div class="clash">${MULT.map((m,i)=>`<div class="col">
+  ${hud(top,done?null:S.prev[top])}
+  <div class="clash${done?' still':''}">${MULT.map((m,i)=>`<div class="col">
     <div class="tile x${m}" style="animation-delay:${reduced?0:i*0.15}s">${ITEMS[S.picks[top][i]].e}</div>
     ${fx(fTop[i],i)}
     <div class="mid display x${m}">×${m}</div>
     ${fx(fBot[i],i)}
     <div class="tile x${m}" style="animation-delay:${reduced?0:i*0.15}s">${ITEMS[S.picks[bot][i]].e}</div>
   </div>`).join('')}</div>
-  ${hud(bot,S.prev[bot])}
+  ${hud(bot,done?null:S.prev[bot])}
   <div class="sum"><span>${h(names()[top])} <b>${net(top)}</b></span><span>${h(names()[bot])} <b>${net(bot)}</b></span></div>
   ${foot}`;
 }
@@ -708,12 +741,56 @@ function vLeft(){
     <div class="big display">${h(R.leftMsg)}</div>
     <p>この対戦はここで終了です。</p>
   </div>
-  <div class="foot"><button class="btn" data-a="title">タイトルへ</button></div>`;
+  <div class="foot">${S.hist.length?'<button class="btn secondary" data-a="recap" style="margin-bottom:10px">振り返りを見る</button>':''}<button class="btn" data-a="title">タイトルへ</button></div>`;
 }
 
+function buildRecap(){
+  const me=S.mode==='online'?R.seat:0, them=1-me, nm=names();
+  const rows=S.hist.map((p,i)=>({n:i+1, mine:p.picks[me], theirs:p.picks[them], lives:[p.after[me],p.after[them]]}));
+  const last=S.hist[S.hist.length-1];
+  const fin=last?[last.after[me],last.after[them]]:[START,START];
+  const over=last?judge(last.after):undefined;
+  let verdict, winner=null;
+  if(over===undefined) verdict='途中終了'; else if(over===null) verdict='引き分け'; else { verdict=nm[over]+'の勝ち'; winner=over+1; }
+  const d=S.date||new Date(), date=`${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
+  const mode=S.mode==='cpu'?`CPU対戦（${S.cpuLevel==='easy'?'ランダム':'読み合い'}）`:S.mode==='local'?'2人対戦':'オンライン対戦';
+  const em=p=>p.map(k=>ITEMS[k].e).join('');
+  const text=[`剣・盾・薬 バトル ${date} ${mode}`,`${nm[me]} vs ${nm[them]}`,
+    ...rows.map(x=>`${x.n}フェーズ目 ${em(x.mine)} vs ${em(x.theirs)} ${x.lives[0]}-${x.lives[1]}`),
+    `結果：${verdict}（${fin[0]}-${fin[1]}）`].join('\n');
+  return {date,mode,me:{name:nm[me],c:me+1},them:{name:nm[them],c:them+1},rows,final:fin,verdict,winner,text};
+}
+function vRecap(){
+  const r=S.lastRecap; if(!r) return vTitle();
+  const em=p=>p.map(k=>ITEMS[k].e).join('');
+  const lives=(a,b)=>`<span class="rl display"><b class="c${r.me.c}">${a}</b><span class="sep">-</span><b class="c${r.them.c}">${b}</b></span>`;
+  const rows=r.rows.map(x=>`<div class="rrow"><span class="rn display">${x.n}</span><span class="rp">${em(x.mine)}</span><span class="rv">vs</span><span class="rp">${em(x.theirs)}</span>${lives(x.lives[0],x.lives[1])}</div>`).join('');
+  const notice=(S.mode==='online'&&R.rematchOffered&&S.recapFrom==='result')?`<p class="note" style="color:var(--heal)">相手が再戦を希望しています（戻ると受けられます）</p>`:'';
+  return `
+  <div class="topbar"><button data-a="recapBack">← 戻る</button>${connBadge()}</div>
+  <div class="recap">
+    <div class="rtitle display">剣・盾・薬</div>
+    <div class="rmeta">${h(r.date)}　${h(r.mode)}</div>
+    <div class="rvs"><span class="pill c${r.me.c}">${h(r.me.name)}</span>vs<span class="pill c${r.them.c}">${h(r.them.name)}</span></div>
+    <div class="rverdict display${r.winner?' c'+r.winner:''}">${h(r.verdict)}</div>
+    <div class="rhdr"><span></span><span>×3×2×1</span><span></span><span>×3×2×1</span><span>ライフ</span></div>
+    ${rows||'<p class="note" style="padding:10px 0">まだフェーズがありません</p>'}
+    <div class="rfinal"><span>${r.rows.length}フェーズで終了</span>${lives(r.final[0],r.final[1])}</div>
+  </div>
+  ${notice}
+  <div class="row"><button class="btn secondary" data-a="copyRecap">テキストをコピー</button>${navigator.share?'<button class="btn secondary" data-a="shareRecap">共有</button>':''}</div>
+  <p class="note">この画面をスクショして保存できます</p>
+  <div style="height:12px"></div>`;
+}
+let toastTimer=null;
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),1600); }
+async function copyText(t){
+  try{ await navigator.clipboard.writeText(t); toast('コピーしました'); return; }catch(e){}
+  try{ const ta=document.createElement('textarea'); ta.value=t; ta.setAttribute('readonly',''); ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); const ok=document.execCommand('copy'); ta.remove(); toast(ok?'コピーしました':'コピーできませんでした'); }catch(e){ toast('コピーできませんでした'); }
+}
 let lastScreen=null;
 function render(){
-  const v={title:vTitle,online:vOnline,handoff:vHandoff,set:()=>vSet(false),wait:()=>vSet(true),result:vResult,left:vLeft}[S.screen];
+  const v={title:vTitle,online:vOnline,handoff:vHandoff,set:()=>vSet(false),wait:()=>vSet(true),result:vResult,left:vLeft,recap:vRecap}[S.screen];
   app.innerHTML=v();
   if(S.screen!==lastScreen){ window.scrollTo(0,0); lastScreen=S.screen; }
 }
@@ -722,6 +799,7 @@ function animateResult(){
   const delay=reduced?0:1700, dur=reduced?0:700;
   setTimeout(()=>{
     if(S.screen!=='result') return;
+    S.resultDone=true;
     app.querySelectorAll('.hud').forEach(el=>{
       const idx=+el.dataset.hud, to=S.life[idx], from=S.prev[idx];
       const bar=el.querySelector('.bar'), numEl=el.querySelector('.num');
@@ -748,7 +826,12 @@ const A={
   cancelOnline(){ leaveOnline(); S.screen='online'; render(); },
   level(v){ S.cpuLevel=v; render(); },
   rules(){ rulesDlg.showModal(); },
-  title(){ stopTimer(); if(S.mode==='online') leaveOnline(); S.screen='title'; render(); },
+  title(){ stopTimer(); if(S.hist.length) S.lastRecap=buildRecap(); if(S.mode==='online') leaveOnline(); S.screen='title'; render(); },
+  recap(){ S.lastRecap=buildRecap(); S.recapFrom=S.screen; S.screen='recap'; render(); },
+  recapLast(){ S.recapFrom='title'; S.screen='recap'; render(); },
+  recapBack(){ S.screen=S.recapFrom||'title'; render(); },
+  copyRecap(){ if(S.lastRecap) copyText(S.lastRecap.text); },
+  shareRecap(){ if(S.lastRecap&&navigator.share) navigator.share({text:S.lastRecap.text}).catch(()=>{}); },
   begin(){ beginSet(S.cur); },
   again(){ startGame(); },
   rematch(){ onlineRematch(); },
